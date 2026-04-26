@@ -12,6 +12,10 @@ import '../../chat/models/chat_message_model.dart';
 import '../../../services/socket_service.dart';
 import '../../../services/api_service.dart';
 import 'dart:async';
+import 'package:dio/dio.dart';
+import '../../../services/export_service.dart';
+import '../widgets/layers_panel.dart';
+
 
 class BoardScreen extends StatefulWidget {
   final String boardId;
@@ -30,6 +34,7 @@ class _BoardScreenState extends State<BoardScreen> {
   final ApiService _apiService = ApiService();
   final CanvasController _canvasController = CanvasController();
   final DrawingProvider _drawingProvider = DrawingProvider();
+  final GlobalKey _canvasKey = GlobalKey();
   
   List<Stroke> _strokes = [];
   List<ChatMessage> _chatMessages = [];
@@ -39,6 +44,9 @@ class _BoardScreenState extends State<BoardScreen> {
   
   bool _isChatVisible = false;
   bool _isLoading = true;
+  bool _showLayersPanel = false;
+  bool _isReplayMode = false;
+  double _replayValue = 1.0;
   String? _boardName;
   String? _error;
   
@@ -80,6 +88,17 @@ class _BoardScreenState extends State<BoardScreen> {
         _strokes = strokes;
         _isLoading = false;
       });
+
+      // Get chat history
+      final chatResponse = await _apiService.getBoardChat(widget.boardId);
+      final chatData = chatResponse.data['messages'] as List<dynamic>;
+      final chatMessages = chatData
+          .map((m) => ChatMessage.fromJson(m as Map<String, dynamic>))
+          .toList();
+      
+      setState(() {
+        _chatMessages = chatMessages;
+      });
       
       _drawingProvider.addStrokes(strokes);
       
@@ -101,10 +120,74 @@ class _BoardScreenState extends State<BoardScreen> {
         (_) => _updateCursorPosition(),
       );
     } catch (e) {
+      if (e is DioException && e.response?.statusCode == 401) {
+        final data = e.response?.data;
+        if (data is Map && data['error'] == 'Password required') {
+          _showPasswordDialog();
+          return;
+        }
+      }
       setState(() {
         _error = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _showPasswordDialog() async {
+    final TextEditingController passwordController = TextEditingController();
+    final bool? result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Password Protected Board'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('This board is private and requires a password to join.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => Navigator.pop(context, true),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Join'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      final password = passwordController.text;
+      if (password.isNotEmpty) {
+        try {
+          setState(() => _isLoading = true);
+          await _apiService.verifyBoardPassword(widget.boardId, password);
+          _initializeBoard(); // Retry initialization after successful verification
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Invalid password'), backgroundColor: Colors.red),
+          );
+          _showPasswordDialog(); // Show again
+        }
+      } else {
+        _showPasswordDialog();
+      }
+    } else {
+      Navigator.pop(context);
     }
   }
   
@@ -299,38 +382,90 @@ class _BoardScreenState extends State<BoardScreen> {
             onPressed: () {
               setState(() {
                 _isChatVisible = !_isChatVisible;
+                if (_isChatVisible) _showLayersPanel = false;
               });
             },
             tooltip: 'Toggle Chat',
           ),
-          PopupMenuButton(
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'reset',
-                child: Row(
-                  children: [
-                    Icon(Icons.refresh),
-                    SizedBox(width: 8),
-                    Text('Reset View'),
-                  ],
-                ),
-              ),
-            ],
-            onSelected: (value) {
-              if (value == 'reset') {
-                _canvasController.reset();
-              }
+          IconButton(
+            icon: Icon(_showLayersPanel ? Icons.layers : Icons.layers_outlined),
+            onPressed: () {
+              setState(() {
+                _showLayersPanel = !_showLayersPanel;
+                if (_showLayersPanel) _isChatVisible = false;
+              });
             },
+            tooltip: 'Toggle Layers',
           ),
-        ],
-      ),
+          IconButton(
+            icon: Icon(_isReplayMode ? Icons.play_circle : Icons.play_circle_outline),
+            onPressed: () {
+              setState(() {
+                _isReplayMode = !_isReplayMode;
+                if (_isReplayMode) {
+                  _showLayersPanel = false;
+                  _isChatVisible = false;
+                  _replayValue = 1.0;
+                }
+              });
+            },
+            tooltip: 'Replay Mode',
+          ),
+          PopupMenuButton<String>(
+            itemBuilder: (context) => <PopupMenuEntry<String>>[
+                const PopupMenuItem(
+                  value: 'reset',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh),
+                      SizedBox(width: 8),
+                      Text('Reset View'),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'export_png',
+                  child: Row(
+                    children: [
+                      Icon(Icons.image),
+                      SizedBox(width: 8),
+                      Text('Export as PNG'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'export_pdf',
+                  child: Row(
+                    children: [
+                      Icon(Icons.picture_as_pdf),
+                      SizedBox(width: 8),
+                      Text('Export as PDF'),
+                    ],
+                  ),
+                ),
+              ],
+              onSelected: (value) {
+                if (value == 'reset') {
+                  _canvasController.reset();
+                } else if (value == 'export_png') {
+                  ExportService.exportToPng(_canvasKey, _boardName ?? 'board');
+                } else if (value == 'export_pdf') {
+                  ExportService.exportToPdf(_canvasKey, _boardName ?? 'board');
+                }
+              },
+            ),
+          ],
+        ),
       body: Row(
         children: [
           // Main canvas area
           Expanded(
-            child: Stack(
-              children: [
-                // Drawing canvas
+            child: RepaintBoundary(
+              key: _canvasKey,
+              child: Stack(
+                children: [
+                  // Drawing canvas
                 GestureDetector(
                   onScaleStart: _canvasController.handleScaleStart,
                   onScaleUpdate: _canvasController.handleScaleUpdate,
@@ -341,17 +476,66 @@ class _BoardScreenState extends State<BoardScreen> {
                       value: _drawingProvider,
                       child: Consumer<DrawingProvider>(
                         builder: (context, provider, _) {
+                          List<Stroke> filteredStrokes = provider.strokes;
+                          
+                          if (_isReplayMode && provider.strokes.isNotEmpty) {
+                            final startTime = provider.strokes.first.timestamp;
+                            final endTime = provider.strokes.last.timestamp;
+                            final threshold = startTime + (endTime - startTime) * _replayValue;
+                            filteredStrokes = provider.strokes
+                                .where((s) => s.timestamp <= threshold)
+                                .toList();
+                          }
+
                           return DrawingCanvas(
-                            strokes: provider.strokes,
+                            strokes: filteredStrokes,
                             onStrokeComplete: _handleStrokeComplete,
                             onCursorMove: _handleCursorMove,
                             backgroundColor: Colors.white,
+                            activeLayerId: provider.activeLayerId,
+                            visibleLayerIds: provider.layers
+                                .where((l) => l['isVisible'] != false)
+                                .map((l) => l['id'] as String)
+                                .toList(),
                           );
                         },
                       ),
                     ),
                   ),
                 ),
+                
+                // Replay slider
+                if (_isReplayMode)
+                  Positioned(
+                    bottom: 32,
+                    left: 64,
+                    right: 64,
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.history),
+                            Expanded(
+                              child: Slider(
+                                value: _replayValue,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _replayValue = value;
+                                  });
+                                },
+                              ),
+                            ),
+                            Text('${(_replayValue * 100).toInt()}%'),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => setState(() => _isReplayMode = false),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 
                 // Remote cursors
                 CursorTracker(
@@ -371,26 +555,30 @@ class _BoardScreenState extends State<BoardScreen> {
               ],
             ),
           ),
+        ),
+          // Layers panel
+          if (_showLayersPanel)
+            ChangeNotifierProvider.value(
+              value: _drawingProvider,
+              child: const LayersPanel(),
+            ),
           
           // Chat panel
           if (_isChatVisible)
-            ChangeNotifierProvider.value(
-              value: _drawingProvider,
-              child: ChatPanel(
-                messages: _chatMessages,
-                onSendMessage: (message) {
-                  _socketService.sendChatMessage(widget.boardId, message);
-                },
-                onTyping: (isTyping) {
-                  _socketService.sendTypingIndicator(widget.boardId, isTyping);
-                },
-                typingUsers: _typingUsers,
-                isVisible: _isChatVisible,
-              ),
+            ChatPanel(
+              messages: _chatMessages,
+              onSendMessage: (message) {
+                _socketService.sendChatMessage(widget.boardId, message);
+              },
+              onTyping: (isTyping) {
+                _socketService.sendTypingIndicator(widget.boardId, isTyping);
+              },
+              typingUsers: _typingUsers,
+              isVisible: _isChatVisible,
+              currentUserId: context.read<AuthProvider>().user?.id,
             ),
         ],
       ),
     );
   }
 }
-

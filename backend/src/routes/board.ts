@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { boardService } from '../services/BoardService';
 import { strokeService } from '../services/StrokeService';
+import { chatService } from '../services/ChatService';
 import { createError } from '../middleware/errorHandler';
 
 const router = Router();
@@ -106,6 +107,74 @@ router.delete('/:boardId', async (req: AuthRequest, res: Response) => {
   try {
     await boardService.deleteBoard(req.params.boardId, req.userId!);
     res.json({ message: 'Board deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Verify board password
+router.post('/:boardId/verify-password', async (req: AuthRequest, res: Response) => {
+  try {
+    const { password } = req.body;
+    const isValid = await boardService.verifyPassword(
+      req.params.boardId,
+      req.userId!,
+      password
+    );
+
+    if (isValid) {
+      res.json({ success: true, message: 'Password verified' });
+    } else {
+      res.status(401).json({ success: false, error: 'Invalid password' });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Layers management
+router.post('/:boardId/layers', async (req: AuthRequest, res: Response) => {
+  try {
+    const { name } = req.body;
+    const board = await boardService.addLayer(req.params.boardId, req.userId!, name);
+    res.status(201).json({ board });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.patch('/:boardId/layers/:layerId', async (req: AuthRequest, res: Response) => {
+  try {
+    const board = await boardService.updateLayer(
+      req.params.boardId,
+      req.userId!,
+      req.params.layerId,
+      req.body
+    );
+    res.json({ board });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/:boardId/layers/:layerId', async (req: AuthRequest, res: Response) => {
+  try {
+    const board = await boardService.deleteLayer(
+      req.params.boardId,
+      req.userId!,
+      req.params.layerId
+    );
+    res.json({ board });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Chat history
+router.get('/:boardId/chat', async (req: AuthRequest, res: Response) => {
+  try {
+    const messages = await chatService.getChatHistory(req.params.boardId);
+    res.json({ messages });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

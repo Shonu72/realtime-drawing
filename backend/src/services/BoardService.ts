@@ -1,4 +1,6 @@
-import { IBoard, Board, BoardRole } from '../models/Board';
+import { IBoard, Board, BoardRole, ILayer } from '../models/Board';
+import { Stroke } from '../models/Stroke';
+
 import { AuditLog, AuditAction } from '../models/AuditLog';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -51,8 +53,8 @@ export class BoardService {
   /**
    * Get board by ID with permission check
    */
-  async getBoard(boardId: string, userId?: string): Promise<IBoard | null> {
-    const board = await Board.findById(boardId);
+  async getBoard(boardId: string, userId?: string, password?: string): Promise<IBoard | null> {
+    const board = await Board.findById(boardId).select('+password');
     if (!board) {
       return null;
     }
@@ -60,14 +62,50 @@ export class BoardService {
     // Check if user has access
     if (userId) {
       const role = board.getMemberRole(userId as any);
-      if (!role && !board.isPublic) {
-        throw new Error('Access denied');
+      if (!role) {
+        // Not a member - check if it's public or password matches
+        if (board.password) {
+          if (!password || !(await board.comparePassword(password))) {
+            const error: any = new Error('Password required');
+            error.statusCode = 401;
+            throw error;
+          }
+        } else if (!board.isPublic) {
+          throw new Error('Access denied');
+        }
       }
     } else if (!board.isPublic) {
       throw new Error('Access denied');
     }
 
     return board;
+  }
+
+  /**
+   * Verify board password and add user as guest/member if correct
+   */
+  async verifyPassword(boardId: string, userId: string, password: string): Promise<boolean> {
+    const board = await Board.findById(boardId).select('+password');
+    if (!board) {
+      throw new Error('Board not found');
+    }
+
+    const isValid = await board.comparePassword(password);
+    if (isValid) {
+      // Add as editor by default if password is correct
+      board.addMember(userId as any, BoardRole.EDITOR);
+      await board.save();
+      
+      // Log audit
+      await AuditLog.create({
+        boardId,
+        userId,
+        action: AuditAction.MEMBER_ADDED,
+        details: { role: BoardRole.EDITOR, method: 'password' }
+      });
+    }
+
+    return isValid;
   }
 
   /**
@@ -193,6 +231,82 @@ export class BoardService {
       action: AuditAction.BOARD_DELETED,
       details: {}
     });
+  }
+
+  /**
+   * Add a new layer to the board
+   */
+  async addLayer(boardId: string, userId: string, name: string): Promise<IBoard> {
+    const board = await Board.findById(boardId);
+    if (!board) throw new Error('Board not found');
+
+    const role = board.getMemberRole(userId as any);
+    if (role !== BoardRole.ADMIN && role !== BoardRole.EDITOR) {
+      throw new Error('Insufficient permissions');
+    }
+
+    const newLayer = {
+      id: uuidv4(),
+      name,
+      isVisible: true,
+      isLocked: false,
+      opacity: 1.0
+    };
+
+    board.layers.push(newLayer);
+    await board.save();
+
+    return board;
+  }
+
+  /**
+   * Update layer properties
+   */
+  async updateLayer(
+    boardId: string,
+    userId: string,
+    layerId: string,
+    updates: Partial<ILayer>
+  ): Promise<IBoard> {
+    const board = await Board.findById(boardId);
+    if (!board) throw new Error('Board not found');
+
+    const role = board.getMemberRole(userId as any);
+    if (role !== BoardRole.ADMIN && role !== BoardRole.EDITOR) {
+      throw new Error('Insufficient permissions');
+    }
+
+    const layerIndex = board.layers.findIndex(l => l.id === layerId);
+    if (layerIndex === -1) throw new Error('Layer not found');
+
+    board.layers[layerIndex] = { ...board.layers[layerIndex], ...updates };
+    await board.save();
+
+    return board;
+  }
+
+  /**
+   * Delete a layer and move its strokes to default
+   */
+  async deleteLayer(boardId: string, userId: string, layerId: string): Promise<IBoard> {
+    if (layerId === 'default') throw new Error('Cannot delete default layer');
+
+    const board = await Board.findById(boardId);
+    if (!board) throw new Error('Board not found');
+
+    const role = board.getMemberRole(userId as any);
+    if (role !== BoardRole.ADMIN) throw new Error('Only admin can delete layers');
+
+    board.layers = board.layers.filter(l => l.id !== layerId);
+    await board.save();
+
+    // Move strokes to default layer
+    await Stroke.updateMany(
+      { boardId, layerId },
+      { $set: { layerId: 'default' } }
+    );
+
+    return board;
   }
 }
 

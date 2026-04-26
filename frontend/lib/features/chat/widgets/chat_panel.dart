@@ -8,6 +8,7 @@ class ChatPanel extends StatefulWidget {
   final Function(bool) onTyping;
   final List<String> typingUsers;
   final bool isVisible;
+  final String? currentUserId;
   
   const ChatPanel({
     super.key,
@@ -16,6 +17,7 @@ class ChatPanel extends StatefulWidget {
     required this.onTyping,
     required this.typingUsers,
     this.isVisible = true,
+    this.currentUserId,
   });
   
   @override
@@ -162,7 +164,7 @@ class _ChatPanelState extends State<ChatPanel> {
   }
   
   Widget _buildMessageBubble(ChatMessage message) {
-    final isCurrentUser = false; // TODO: Get from auth provider
+    final isCurrentUser = widget.currentUserId != null && message.userId == widget.currentUserId;
     
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),

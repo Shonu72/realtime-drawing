@@ -10,12 +10,16 @@ class DrawingCanvas extends StatefulWidget {
   final Color backgroundColor;
   final double? width;
   final double? height;
+  final String activeLayerId;
+  final List<String> visibleLayerIds;
   
   const DrawingCanvas({
     super.key,
     required this.strokes,
     required this.onStrokeComplete,
     required this.onCursorMove,
+    required this.activeLayerId,
+    required this.visibleLayerIds,
     this.backgroundColor = Colors.white,
     this.width,
     this.height,
@@ -68,6 +72,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       points: [point],
       color: _colorToHex(_currentColor),
       width: _currentWidth,
+      layerId: widget.activeLayerId,
       timestamp: point.timestamp,
       version: 0,
     );
@@ -121,6 +126,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         ),
         painter: _CanvasPainter(
           strokes: widget.strokes,
+          visibleLayerIds: widget.visibleLayerIds,
           currentStroke: _currentStroke,
           backgroundColor: widget.backgroundColor,
         ),
@@ -131,11 +137,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
 class _CanvasPainter extends CustomPainter {
   final List<Stroke> strokes;
+  final List<String> visibleLayerIds;
   final Stroke? currentStroke;
   final Color backgroundColor;
   
   _CanvasPainter({
     required this.strokes,
+    required this.visibleLayerIds,
     this.currentStroke,
     required this.backgroundColor,
   });
@@ -148,7 +156,9 @@ class _CanvasPainter extends CustomPainter {
     
     // Draw all strokes
     for (final stroke in strokes) {
-      if (!stroke.deleted && stroke.points.length > 1) {
+      if (!stroke.deleted && 
+          stroke.points.length > 1 && 
+          visibleLayerIds.contains((stroke.layerId?.isEmpty ?? true) ? 'default' : stroke.layerId)) {
         _drawStroke(canvas, stroke);
       }
     }

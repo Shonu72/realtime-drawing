@@ -1,4 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import bcrypt from 'bcryptjs';
+
 
 export enum BoardRole {
   ADMIN = 'admin',
@@ -10,6 +12,14 @@ export interface IBoardMember {
   userId: mongoose.Types.ObjectId;
   role: BoardRole;
   joinedAt: Date;
+}
+
+export interface ILayer {
+  id: string;
+  name: string;
+  isVisible: boolean;
+  isLocked: boolean;
+  opacity: number;
 }
 
 export interface IBoard extends Document {
@@ -25,11 +35,13 @@ export interface IBoard extends Document {
     enableChat: boolean;
     enableReplay: boolean;
   };
+  layers: ILayer[];
   createdAt: Date;
   updatedAt: Date;
   addMember(userId: mongoose.Types.ObjectId, role: BoardRole): void;
   removeMember(userId: mongoose.Types.ObjectId): void;
   getMemberRole(userId: mongoose.Types.ObjectId): BoardRole | null;
+  comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
 const BoardMemberSchema = new Schema<IBoardMember>({
@@ -92,7 +104,16 @@ const BoardSchema = new Schema<IBoard>(
         type: Boolean,
         default: true
       }
-    }
+    },
+    layers: [
+      {
+        id: { type: String, required: true },
+        name: { type: String, required: true },
+        isVisible: { type: Boolean, default: true },
+        isLocked: { type: Boolean, default: false },
+        opacity: { type: Number, default: 1.0 }
+      }
+    ]
   },
   {
     timestamps: true
@@ -107,7 +128,26 @@ BoardSchema.pre('save', function (next) {
       role: BoardRole.ADMIN,
       joinedAt: new Date()
     });
+
+    if (this.layers.length === 0) {
+      this.layers.push({
+        id: 'default',
+        name: 'Layer 1',
+        isVisible: true,
+        isLocked: false,
+        opacity: 1.0
+      });
+    }
   }
+  next();
+});
+
+// Hash password before saving
+BoardSchema.pre('save', async function (next) {
+  if (!this.isModified('password') || !this.password) return next();
+  
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
@@ -137,6 +177,11 @@ BoardSchema.methods.getMemberRole = function (userId: mongoose.Types.ObjectId): 
     (m: IBoardMember) => m.userId.toString() === userId.toString()
   );
   return member ? member.role : null;
+};
+
+BoardSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
+  if (!this.password) return true;
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
 export const Board = mongoose.model<IBoard>('Board', BoardSchema);

@@ -13,12 +13,19 @@ class DrawingProvider with ChangeNotifier {
   String? _currentBoardId;
   String? _currentUserId;
   
+  String _activeLayerId = 'default';
+  List<Map<String, dynamic>> _layers = [
+    {'id': 'default', 'name': 'Layer 1', 'isVisible': true, 'isLocked': false}
+  ];
+  
   final _uuid = const Uuid();
   
   List<Stroke> get strokes => List.unmodifiable(_strokes);
   StrokeTool get currentTool => _currentTool;
   Color get currentColor => _currentColor;
   double get currentWidth => _currentWidth;
+  String get activeLayerId => _activeLayerId;
+  List<Map<String, dynamic>> get layers => List.unmodifiable(_layers);
   
   void initialize(String boardId, String userId) {
     _currentBoardId = boardId;
@@ -40,10 +47,34 @@ class DrawingProvider with ChangeNotifier {
     notifyListeners();
   }
   
+  void setActiveLayer(String layerId) {
+    _activeLayerId = layerId;
+    notifyListeners();
+  }
+  
+  void setLayers(List<Map<String, dynamic>> layers) {
+    _layers = layers;
+    if (!_layers.any((l) => l['id'] == _activeLayerId)) {
+      _activeLayerId = _layers.first['id'];
+    }
+    notifyListeners();
+  }
+  
+  void toggleLayerVisibility(String layerId) {
+    final index = _layers.indexWhere((l) => l['id'] == layerId);
+    if (index != -1) {
+      _layers[index]['isVisible'] = !(_layers[index]['isVisible'] ?? true);
+      notifyListeners();
+    }
+  }
+  
   void addStroke(Stroke stroke) {
     // Add ID if not present
     final strokeWithId = stroke.id.isEmpty
-        ? stroke.copyWith(id: _uuid.v4())
+        ? stroke.copyWith(
+            id: _uuid.v4(),
+            layerId: stroke.layerId!.isEmpty ? _activeLayerId : stroke.layerId,
+          )
         : stroke;
     
     _strokes.add(strokeWithId);

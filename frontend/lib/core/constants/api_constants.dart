@@ -1,6 +1,7 @@
 class ApiConstants {
   // Backend API URL
-  static const String baseUrl = 'http://localhost:3000';
+  static const String baseUrl = 'http://10.178.34.95:3000';
+  // static const String baseUrl = 'http://localhost:3000';
   static const String apiBaseUrl = '$baseUrl/api';
   
   // Socket.IO URL
@@ -16,6 +17,8 @@ class ApiConstants {
   static String boardStrokes(String id) => '/boards/$id/strokes';
   static String boardMembers(String id) => '/boards/$id/members';
   static String boardSettings(String id) => '/boards/$id/settings';
+  static String boardVerifyPassword(String id) => '/boards/$id/verify-password';
+  static String boardChat(String id) => '/boards/$id/chat';
   
   // Socket Events
   static const String socketBoardJoin = 'board:join';

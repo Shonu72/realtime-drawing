@@ -139,5 +139,16 @@ class ApiService {
       '${ApiConstants.boardMembers(boardId)}/$userId',
     );
   }
+  
+  Future<Response> verifyBoardPassword(String boardId, String password) async {
+    return await _dio.post(
+      ApiConstants.boardVerifyPassword(boardId),
+      data: {'password': password},
+    );
+  }
+
+  Future<Response> getBoardChat(String boardId) async {
+    return await _dio.get(ApiConstants.boardChat(boardId));
+  }
 }
 

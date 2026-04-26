@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { AuthSocket } from '../middleware/auth';
 import { strokeService } from '../services/StrokeService';
 import { boardService } from '../services/BoardService';
+import { chatService } from '../services/ChatService';
 import { BoardRole } from '../models/Board';
 import { socketRateLimiter } from '../middleware/rateLimiter';
 
@@ -250,6 +251,8 @@ export const setupSocketHandlers = (io: SocketIOServer, socket: AuthSocket): voi
         socket.emit('error', { message: 'Chat disabled' });
         return;
       }
+
+      await chatService.saveMessage(data.boardId, userId, user.name, data.message);
 
       io.to(`board:${data.boardId}`).emit('chat:message', {
         userId,
